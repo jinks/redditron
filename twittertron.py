@@ -57,7 +57,7 @@ def main(memc, op, username = '', password = ''):
                 print 'tweeting: %r' % x
                 api.PostUpdate(x)
 
-                time.sleep(5*60) # post one per minute
+                time.sleep(60*60) # post one per hour
 
     else:
         raise ValueError('unkown op %r?' % op)
