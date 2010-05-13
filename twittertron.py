@@ -43,9 +43,11 @@ def get_twitter_status(cache, api):
 
                     except (ValueError, twitter.TwitterError, urllib2.HTTPError), e:
                         try:
-                            api.PostDirectMessage(s.user.name, "i can't follow %r" % newfriendname)
-                        except:
-                            print "Couldn't reply to %r after failed instruction to follow %r (%r)" % (s.user.name, friendname, e)
+                            api.PostDirectMessage(s.user.screen_name,
+                                                  "i can't follow %r" % newfriendname)
+                        except Exception, f:
+                            print ("Couldn't reply to %r after failed instruction to follow %r (%r; %r)"
+                                   % (s.user.screen_name, newfriendname, e, f))
 
                     else:
                         new_status = api.GetUserTimeline(newfriendname)
@@ -56,9 +58,9 @@ def get_twitter_status(cache, api):
                         cache.set_multi(dict((_seen_key(ss), True)
                                              for ss in new_status))
 
-                elif s.user.name.lower() != api._username.lower():
+                elif s.user.screen_name.lower() != api._username.lower():
                     text = s.text.encode('utf8')
-                    print 'Learning from %s: %r...' % (s.user.name, text)
+                    print 'Learning from %s: %r...' % (s.user.screen_name, text)
                     yield text
 
             last = status[-1].id
