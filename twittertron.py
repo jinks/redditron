@@ -52,11 +52,10 @@ def get_twitter_status(cache, api):
                     else:
                         new_status = api.GetUserTimeline(newfriendname)
                         for user_status in new_status:
+                            cache.set(_seen_key(ss), True)
                             text = s.text.encode('utf8')
                             print 'Learning from %s: %r...' % (newfriendname, text)
                             yield text
-                        cache.set_multi(dict((_seen_key(ss), True)
-                                             for ss in new_status))
 
                 elif s.user.screen_name.lower() != api._username.lower():
                     text = s.text.encode('utf8')
