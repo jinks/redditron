@@ -12,7 +12,7 @@ from memcov import Cache, save_chains, create_sentences, limit
 MAX_LENGTH = 140
 
 def get_twitter_status(cache, api):
-    follow_cmd_re = re.compile('^@(%s) follow @?([A-Za-z0-9_]+)$' % api._username)
+    follow_cmd_re = re.compile('^@(%s) follow @?([A-Za-z0-9_]+)$' % api._username.lower())
 
     def _seen_key(i):
         return str('seen_%s' % i.id)
@@ -30,7 +30,7 @@ def get_twitter_status(cache, api):
             print '%d new status' % len(status)
 
             for s in status:
-                follow_cmd_match = follow_cmd_re.match(s.text)
+                follow_cmd_match = follow_cmd_re.match(s.text.lower())
                 if follow_cmd_match:
                     # one of our friends has given us the command to
                     # follow someone else
@@ -49,7 +49,7 @@ def get_twitter_status(cache, api):
                         cache.set_multi(dict((_seen_key(ss), True)
                                              for ss in new_status))
 
-                else:
+                elif s.user.name.lower() != api._username.lower():
                     text = s.text.encode('utf8')
                     yield text
 
