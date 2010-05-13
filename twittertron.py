@@ -27,8 +27,6 @@ def get_twitter_status(cache, api):
         status = [s for s in status if _seen_key(s) not in seen]
 
         if status:
-            print '%d new status' % len(status)
-
             for s in status:
                 follow_cmd_match = follow_cmd_re.match(s.text.lower())
                 if follow_cmd_match:
@@ -45,12 +43,15 @@ def get_twitter_status(cache, api):
                     else:
                         new_status = api.GetUserTimeline(newfriendname)
                         for user_status in new_status:
-                            yield user_status.text
+                            text = s.text.encode('utf8')
+                            print 'Learning from %r...' % (text,)
+                            yield text
                         cache.set_multi(dict((_seen_key(ss), True)
                                              for ss in new_status))
 
                 elif s.user.name.lower() != api._username.lower():
                     text = s.text.encode('utf8')
+                    print 'Learning from %r...' % (text,)
                     yield text
 
             cache.set_multi(dict((_seen_key(s), True)
