@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import re
 import sys
 import time
 
@@ -10,6 +11,8 @@ from memcov import Cache, save_chains, create_sentences, limit
 MAX_LENGTH = 140
 
 def get_twitter_status(cache, api):
+    follow_cmd_re = re.compile('^@(%s) follow @?([A-Za-z0-9_]+)$' % api._username)
+
     def _seen_key(i):
         return str('seen_%s' % i.id)
 
@@ -17,7 +20,7 @@ def get_twitter_status(cache, api):
 
     while True:
         # the plural of status is status
-        status = list(api.GetPublicTimeline(since_id = last))
+        status = list(api.GetFriendsTimeline(since_id = last, count=200))
         seen = cache.get_multi([_seen_key(s)
                                 for s in status])
         status = [s for s in status if _seen_key(s) not in seen]
@@ -26,8 +29,19 @@ def get_twitter_status(cache, api):
             print '%d new status' % len(status)
 
             for s in status:
-                text = s.text.encode('utf8')
-                yield text
+                follow_cmd_match = follow_cmd_re.match(s.text)
+                if follow_cmd_match:
+                    # one of our friends has given us the command to
+                    # follow someone else
+                    newfriendname = follow_cmd_match.group(2)
+                    try:
+                        print 'Attempting to follow %r...' % (newfriendname,)
+                        api.CreateFriendship(newfriendname)
+                    except (ValueError, twitter.TwitterError):
+                        api.PostDirectMessage(s.user, "i can't follow %r" % newfriendname)
+                else:
+                    text = s.text.encode('utf8')
+                    yield text
 
             cache.set_multi(dict((_seen_key(s), True)
                                  for s in status))

@@ -58,6 +58,9 @@ class Token(object):
     # must keep the splitter in sync with the types. None of these can
     # include pipes because we use them as a meta-character
     split_re = re.compile(r'(\s+|[A-Za-z0-9\'-]+|[?,!;:.()])')
+    skip_re  = re.compile(r'^http.*') # tokens to skip when
+                                      # tokenising. these are before
+                                      # the split_re is applied
     capnexts = '?!.'
     nospaces_after = '('
 
@@ -77,10 +80,12 @@ class Token(object):
            parsed from it"""
         if beginend:
             yield BeginToken()
-        for x in cls.split_re.split(text):
-            tok = cls(x)
-            if tok.kind != 'whitespace':
-                yield tok
+        for x in text.split(' '):
+            if not cls.skip_re.match(x):
+                for y in cls.split_re.split(text):
+                    tok = cls(y)
+                    if tok.kind != 'whitespace':
+                        yield tok
         if beginend and endtokens:
             yield EndToken()
 
