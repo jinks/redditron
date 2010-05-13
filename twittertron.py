@@ -11,11 +11,11 @@ from memcov import Cache, save_chains, create_sentences, limit
 
 MAX_LENGTH = 140
 
+def _seen_key(i):
+    return str('seen_%s' % i.id)
+
 def get_twitter_status(cache, api):
     follow_cmd_re = re.compile('^@(%s) follow @?([A-Za-z0-9_]+)$' % api._username.lower())
-
-    def _seen_key(i):
-        return str('seen_%s' % i.id)
 
     last = None
 
@@ -68,7 +68,16 @@ def get_twitter_status(cache, api):
         # http://apiwiki.twitter.com/Rate-limiting
         time.sleep(35)
 
-def main(memc, op, username = '', password = ''):
+def load_user(cache, api, newfriendname):
+    status = api.GetUserTimeline(newfriendname, count=200)
+    for s in status:
+        if not cache.get(_seen_key(s)):
+            cache.set(_seen_key(s), True)
+            text = s.text.encode('utf-8')
+            print 'Learning from %s: %r...' % (newfriendname, text)
+            yield s.text.encode('utf-8')
+
+def main(memc, op, username = '', password = '', newfriendname = ''):
     cache = Cache(memc)
 
     if username and password:
@@ -79,6 +88,9 @@ def main(memc, op, username = '', password = ''):
 
     if op == 'save':
         status = get_twitter_status(cache, api)
+        save_chains(cache, status)
+    elif op == 'load_user':
+        status = load_user(cache, api, newfriendname)
         save_chains(cache, status)
     elif op == 'tweet':
         for x in create_sentences(cache, 100):
