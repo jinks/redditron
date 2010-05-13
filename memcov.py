@@ -82,7 +82,7 @@ class Token(object):
             yield BeginToken()
         for x in text.split(' '):
             if not cls.skip_re.match(x):
-                for y in cls.split_re.split(text):
+                for y in cls.split_re.split(x):
                     tok = cls(y)
                     if tok.kind != 'whitespace':
                         yield tok
