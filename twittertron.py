@@ -38,8 +38,17 @@ def get_twitter_status(cache, api):
                     try:
                         print 'Attempting to follow %r...' % (newfriendname,)
                         api.CreateFriendship(newfriendname)
+
                     except (ValueError, twitter.TwitterError, urllib2.HTTPError):
                         api.PostDirectMessage(s.user.name, "i can't follow %r" % newfriendname)
+
+                    else:
+                        new_status = api.GetUserTimeline(newfriendname)
+                        for user_status in new_status:
+                            yield user_status.text
+                        cache.set_multi(dict((_seen_key(ss), True)
+                                             for ss in new_status))
+
                 else:
                     text = s.text.encode('utf8')
                     yield text
