@@ -28,6 +28,10 @@ def get_twitter_status(cache, api):
 
         if status:
             for s in status:
+                # declare that we've seen it immediately so that if it
+                # causes us to fail, we don't try again
+                cache.set(_seen_key(s), True)
+
                 follow_cmd_match = follow_cmd_re.match(s.text.lower())
                 if follow_cmd_match:
                     # one of our friends has given us the command to
@@ -37,25 +41,25 @@ def get_twitter_status(cache, api):
                         print 'Attempting to follow %r...' % (newfriendname,)
                         api.CreateFriendship(newfriendname)
 
-                    except (ValueError, twitter.TwitterError, urllib2.HTTPError):
-                        api.PostDirectMessage(s.user.name, "i can't follow %r" % newfriendname)
+                    except (ValueError, twitter.TwitterError, urllib2.HTTPError), e:
+                        try:
+                            api.PostDirectMessage(s.user.name, "i can't follow %r" % newfriendname)
+                        except:
+                            print "Couldn't reply to %r after failed instruction to follow %r (%r)" % (s.user.name, friendname, e)
 
                     else:
                         new_status = api.GetUserTimeline(newfriendname)
                         for user_status in new_status:
                             text = s.text.encode('utf8')
-                            print 'Learning from %r...' % (text,)
+                            print 'Learning from %s: %r...' % (newfriendname, text)
                             yield text
                         cache.set_multi(dict((_seen_key(ss), True)
                                              for ss in new_status))
 
                 elif s.user.name.lower() != api._username.lower():
                     text = s.text.encode('utf8')
-                    print 'Learning from %r...' % (text,)
+                    print 'Learning from %s: %r...' % (s.user.name, text)
                     yield text
-
-            cache.set_multi(dict((_seen_key(s), True)
-                                 for s in status))
 
             last = status[-1].id
 
