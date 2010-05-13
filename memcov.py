@@ -249,8 +249,8 @@ def save_chains(cache, it):
             followers_key = hash_tokens(preds)
             count_key = _count_key(followers_key, text)
 
-            cache.add(followers_key, '')
-            cache.append(followers_key, '|%s' % (text,))
+            cache.set(followers_key,
+                      (cache.get(followers_key) or '')+ '|%s' % (text,))
             cache.add(count_key, 0)
             cache.incr(count_key)
 
