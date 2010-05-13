@@ -5,6 +5,7 @@ import sys
 import time
 
 import twitter
+import urllib2 # python-twitter throws exceptions from here
 
 from memcov import Cache, save_chains, create_sentences, limit
 
@@ -37,8 +38,8 @@ def get_twitter_status(cache, api):
                     try:
                         print 'Attempting to follow %r...' % (newfriendname,)
                         api.CreateFriendship(newfriendname)
-                    except (ValueError, twitter.TwitterError):
-                        api.PostDirectMessage(s.user, "i can't follow %r" % newfriendname)
+                    except (ValueError, twitter.TwitterError, urllib2.HTTPError):
+                        api.PostDirectMessage(s.user.name, "i can't follow %r" % newfriendname)
                 else:
                     text = s.text.encode('utf8')
                     yield text
