@@ -68,7 +68,7 @@ def process_commands(cache, api):
                 # follow someone else
                 newfriendname = follow_cmd_match.group(1)
                 try:
-                    print '%r has instructed me to follow %r' % (db.sender_screen_name,
+                    print '%r has instructed me to follow %r' % (dm.sender_screen_name,
                                                                  newfriendname)
                     api.CreateFriendship(newfriendname)
 
