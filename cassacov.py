@@ -5,7 +5,9 @@ import sys
 import random
 import itertools
 from zlib import crc32
-from memcache import Client
+
+import pycassa
+import cassandra.ttypes
 
 chain_length = 5
 # chains of longer lengths are weighted more heavily when picking the
@@ -16,9 +18,71 @@ chain_weights = range(1, chain_length+1)
 # so biases for longer comments
 endtokens = False
 
-class Cache(Client):
-    def __init__(self, iden):
-        Client.__init__(self, iden.split(','))
+def trace(fn):
+    def _fn(*a, **kw):
+        sys.stderr.write('%r(%r, %r)\n' % (fn, a, kw))
+        ret = fn(*a, **kw)
+        # sys.stderr.write('%r(%r, %r): %r\n' % (fn, a, kw, ret))
+        return ret
+    return _fn
+
+class Cache(object):
+    # Types:
+    # * tokenlist() -> [Token]
+    # * hashedtoken()
+    def __init__(self, init_args):
+        seed, keyspace, column_family,seen_cf = init_args.split(',')
+        self.seeds = [seed]
+        self.keyspace = keyspace
+        self.column_family = column_family
+
+        self.client = pycassa.connect_thread_local(self.seeds)
+        self.cf = pycassa.ColumnFamily(self.client, self.keyspace,
+                                       self.column_family)
+        self.seen_cf = pycassa.ColumnFamily(self.client, self.keyspace,
+                                            seen_cf)
+
+    def _hash_tokens(self, tokens):
+        """tokenlist() -> hashedtoken()"""
+        return ' '.join(tok.tok.encode('utf-8') for tok in tokens)
+
+    def get_followers(self, keys):
+        """get_followers([tokenlist()]) -> dict(Token -> count)"""
+        try:
+            stored = self.cf.get(self._hash_tokens(keys))
+            return dict((Token(k), int(v))
+                        for (k, v)
+                        in stored.iteritems())
+        except (cassandra.ttypes.NotFoundException, KeyError, ValueError):
+            return {}
+
+
+    def incr_follower(self, preds, token):
+        """incr_followers(token(), [followers])"""
+        # followers may contain duplicates
+        try:
+            existing = int(self.cf.get(self._hash_tokens(preds))[token.tok])
+        except (cassandra.ttypes.NotFoundException, KeyError, ValueError):
+            existing = 0
+        self.cf.insert(self._hash_tokens(preds), {token.tok: str(existing+1)})
+
+    def saw(self, key):
+        self.seen_cf.insert(key, {'seen': '1'})
+
+    def seen(self, key):
+        try:
+            return self.seen_cf.get(key, columns=['seen'])['seen'] == '1'
+        except (cassandra.ttypes.NotFoundException, KeyError), e:
+            return False
+
+    def seen_iterator(self, it, key = lambda x: x):
+        # this filter errs on the side of acking an item before it's
+        # been processed.
+        for x in it:
+            seen_key = key(x)
+            if not self.seen(seen_key):
+                self.saw(seen_key)
+                yield x
 
 class LookBehind(object):
     def __init__(self, size, init=[]):
@@ -99,8 +163,8 @@ class Token(object):
 
     @classmethod
     def detokenize(cls, tokens):
-        """Given a stream of tokens, yield strings that look like
-           English sentences"""
+        """Given a stream of tokens, yield strings that concatenate to
+           look like English sentences"""
         lookbehind = LookBehind(1)
 
         for tok in tokens:
@@ -124,7 +188,7 @@ class Token(object):
             lookbehind.append(tok)
 
 class BeginToken(Token):
-    tok = '\01'
+    tok = 'BeginToken'
     kind = 'special'
 
     def __init__(self):
@@ -133,7 +197,7 @@ class BeginToken(Token):
         return "BeginToken()"
 
 class EndToken(Token):
-    tok = '\02'
+    tok = 'EndToken'
     kind = 'special'
 
     def __init__(self):
@@ -190,53 +254,10 @@ def token_predecessors(lb):
     """
     l = list(reversed(lb))
     for x in range(len(l)):
-        yield l[-x-1:]
-
-def hash_tokens(tokens):
-    return str(crc32(''.join(tok.tok.encode('utf8')
-                             for tok in tokens)))
-
-def _followers(cache, h):
-    c = cache.get(h) or ''
-    s = c or ''
-    l = c.split('|')
-    l = filter(None, l)
-    return l
+        yield tuple(l[-x-1:])
 
 def _count_key(h, follower):
     return "%s_%s" % (h, crc32(follower))
-
-def get_followers(cache, h):
-    """Given a hash of a token or set of tokens, return a dict of all
-       potential followers and their weights"""
-    followers = _followers(cache, h)
-    weight_keys = dict((_count_key(h, f), f)
-                       for f in followers)
-    weight_vals = cache.get_multi(weight_keys.keys())
-    weights = dict((weight_keys[x], weight_vals[x])
-                   for x in weight_vals
-                   if weight_keys[x] > 0)
-    return weights
-
-def cleanup_counts(cache, followers_key):
-    """To store the followers in memcached, we store one key
-       containing a list of all of the followers, and then a key for
-       each follower. This function deduplicates the list of followers
-       and removes entries for which memcached has dropped the key
-       containing the count"""
-
-    followers = _followers(cache, followers_key)
-    followers = set(followers)
-    count_keys = [_count_key(followers_key, x)
-                  for x in followers]
-    existing_followers = cache.get_multi(count_keys)
-    existing_followers = [x for x in followers
-                          if existing_followers.get(_count_key(followers_key, x), 0) > 0]
-    random.shuffle(existing_followers)
-    if existing_followers:
-        cache.set(followers_key, '|'.join(existing_followers)[:(1024*1024-1)])
-    else:
-        cache.delete(followers_key)
 
 def save_chains(cache, it):
     """Turn all of the strings yielded by `it' into chains and save
@@ -245,17 +266,7 @@ def save_chains(cache, it):
         tokens = Token.tokenize(cm)
         followers = token_followers(tokens)
         for preds, token in followers:
-            text = token.tok.encode('utf8')
-            followers_key = hash_tokens(preds)
-            count_key = _count_key(followers_key, text)
-
-            cache.set(followers_key,
-                      (cache.get(followers_key) or '')+ '|%s' % (text,))
-            cache.add(count_key, 0)
-            cache.incr(count_key)
-
-            if random.randint(0, 100) == 0:
-                cleanup_counts(cache, followers_key)
+            cache.incr_follower(preds, token)
 
 def create_chain(cache):
     """Read the chains created by save_chains from memcached and yield
@@ -263,49 +274,33 @@ def create_chain(cache):
     lb = LookBehind(chain_length, [BeginToken()])
 
     while True:
-        preds = list(token_predecessors(lb))
-        hashes = dict((hash_tokens(x), len(x))
-                      for x in preds)
-        # dict(hash -> dict(follower -> weight))
-        #cached_hashes = cache.get_multi(hashes.keys())
-        cached_hashes = dict((h, get_followers(cache, h))
-                             for h in hashes)
-        # remove the hashes with no followers
-        cached_hashes = dict((h, fs) for (h, fs)
-                             in cached_hashes.iteritems()
-                             if fs)
+        potential_followers = []
+        all_preds = list(token_predecessors(lb))
 
-        if not cached_hashes:
+        # build up the weights for the next token based on
+        # occurrence-counts in the source data * the length
+        # weight. build a list by duplicating the items according to
+        # their weight. So given {a: 2, b: 3}, generate the list
+        # [a, a, b, b, b]
+        for preds in all_preds:
+            for f, weight in cache.get_followers(preds).iteritems():
+                potential_followers.extend([f] * (weight * chain_weights[len(preds)-1]))
+
+        if not potential_followers:
             # no idea what the next token should be. This should only
             # happen if the storage backend has dumped the list of
             # followers for the previous token (since if it has no
             # followers, it would at least have an EndToken follower)
             break
 
-        # build up the weights for the next token based on
-        # occurrence-counts in the source data * the length weight
-        weights = {}
-        for h, f_weights in cached_hashes.iteritems():
-            for tok, weight in f_weights.iteritems():
-                weights[tok] = (weights.get(tok, 0)
-                                + weight * chain_weights[hashes[h]-1])
+        next = random.choice(potential_followers)
 
-        # now with the finished weights, build a list by duplicating
-        # the items according to their weight. So given {a: 2, b: 3},
-        # generate the list [a, a, b, b, b]
-        weighted_list = []
-        for tok, weight in weights.iteritems():
-            weighted_list.extend([tok] * weight)
-
-        next = random.choice(weighted_list)
-
-        if next == EndToken.tok:
+        if next.tok == EndToken.tok:
             break
 
-        token = Token(next)
-        yield token
+        yield next
 
-        lb.append(token)
+        lb.append(next)
 
 def create_sentences(cache, length):
     """Create chains with create_chain and yield lines that look like
@@ -316,11 +311,12 @@ def create_sentences(cache, length):
 
 def main(memc, lim = None):
     cache = Cache(memc)
-    lim = int(lim)
+    lim = int(lim) if lim else None
 
     try:
         for x in limit(create_sentences(cache, 100), lim):
-            print x
+            if x:
+                print x
     except KeyboardInterrupt:
         pass
 

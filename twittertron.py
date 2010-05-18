@@ -7,7 +7,7 @@ import time
 import twitter
 import urllib2 # python-twitter throws exceptions from here
 
-from memcov import Cache, save_chains, create_sentences, limit
+from cassacov import Cache, save_chains, create_sentences, limit
 
 MAX_LENGTH = 140
 
@@ -51,15 +51,10 @@ def make_tweet(cache):
 follow_cmd_re = re.compile('^follow @?([A-Za-z0-9_]+)$')
 tweetme_cmd_re = re.compile('^tweetme$')
 def process_commands(cache, api):
-
     while True:
         dms = api.GetDirectMessages()
-        seen = cache.get_multi(map(_seen_key, dms))
-        dms = filter(lambda dm: _seen_key(dm) not in seen, dms)
 
-        for dm in dms:
-            cache.set(_seen_key(dm), True)
-
+        for dm in cache.seen_iterator(dms, _seen_key):
             follow_cmd_match = follow_cmd_re.match(dm.text.lower())
             tweetme_cmd_match = not follow_cmd_match and tweetme_cmd_re.match(dm.text.lower())
 
@@ -99,23 +94,17 @@ def get_twitter_status(cache, api):
 
     while True:
         # the plural of status is status
-        status = list(api.GetFriendsTimeline(since_id = last, count=200))
-        seen = cache.get_multi([_seen_key(s)
-                                for s in status])
-        status = [s for s in status if _seen_key(s) not in seen]
+        status = api.GetFriendsTimeline(since_id = last, count=200)
 
-        if status:
-            for s in status:
-                # declare that we've seen it immediately so that if it
-                # causes us to fail, we don't try again
-                cache.set(_seen_key(s), True)
+        s = None
+        for s in status:
+            if s.user.screen_name.lower() != api._username.lower():
+                text = s.text.encode('utf8')
+                print 'Learning from %s: %r' % (s.user.screen_name, text)
+                yield text
 
-                if s.user.screen_name.lower() != api._username.lower():
-                    text = s.text.encode('utf8')
-                    print 'Learning from %s: %r' % (s.user.screen_name, text)
-                    yield text
-
-            last = status[-1].id
+        if s is not None:
+            last = s.id
 
         # 35 looks to be optimal for preventing rate-limiting
         # http://apiwiki.twitter.com/Rate-limiting
@@ -123,12 +112,11 @@ def get_twitter_status(cache, api):
 
 def load_user(cache, api, newfriendname):
     status = api.GetUserTimeline(newfriendname, count=200)
+    status = cache.seen_iterator(status, _seen_key)
     for s in status:
-        if not cache.get(_seen_key(s)):
-            cache.set(_seen_key(s), True)
-            text = s.text.encode('utf-8')
-            print 'Learning from %s: %r' % (newfriendname, text)
-            yield s.text.encode('utf-8')
+        text = s.text.encode('utf-8')
+        print 'Learning from %s: %r' % (newfriendname, text)
+        yield s.text.encode('utf-8')
 
 def _seen_key(i):
     return str('seen_%s' % i.id)
