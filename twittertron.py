@@ -36,9 +36,13 @@ def main(memc, op, username = '', password = '', newfriendname = ''):
             x = make_tweet(cache)
             if x:
                 print 'tweeting: %r' % x
-                api.PostUpdate(x)
+                try:
+                    api.PostUpdate(x)
+                    time.sleep(60*60) # post one per hour
+                except urllib2.HTTPError, e:
+                    print "Couldn't tweet, will retry", e
+                    time.sleep(120) # try again in a couple of minutes
 
-                time.sleep(60*60) # post one per hour
 
     else:
         raise ValueError('unkown op %r?' % op)
@@ -52,7 +56,12 @@ follow_cmd_re = re.compile('^follow @?([A-Za-z0-9_]+)$')
 tweetme_cmd_re = re.compile('^tweetme$')
 def process_commands(cache, api):
     while True:
-        dms = api.GetDirectMessages()
+        try:
+            dms = api.GetDirectMessages()
+        except urllib2.HTTPError, e:
+            print "Couldn't get direct messages, will retry", e
+            time.sleep(120)
+            continue
 
         for dm in cache.seen_iterator(dms, _seen_key):
             follow_cmd_match = follow_cmd_re.match(dm.text.lower())
@@ -94,7 +103,13 @@ def get_twitter_status(cache, api):
 
     while True:
         # the plural of status is status
-        status = api.GetFriendsTimeline(since_id = last, count=200)
+        try:
+            status = api.GetFriendsTimeline(since_id = last, count=200)
+        except urllib2.HTTPError, e:
+            print "Couldn't get timeline, will retry", e
+            time.sleep(120)
+            continue
+
         status = cache.seen_iterator(status, _seen_key)
 
         s = None
