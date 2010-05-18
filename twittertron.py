@@ -95,6 +95,7 @@ def get_twitter_status(cache, api):
     while True:
         # the plural of status is status
         status = api.GetFriendsTimeline(since_id = last, count=200)
+        status = cache.seen_iterator(status, _seen_key)
 
         s = None
         for s in status:
