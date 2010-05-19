@@ -49,7 +49,7 @@ class Cache(object):
     def get_followers(self, keys):
         """get_followers([tokenlist()]) -> dict(Token -> count)"""
         try:
-            stored = self.cf.get(self._hash_tokens(keys))
+            stored = self.cf.get(self._hash_tokens(keys), column_count=10*1000)
             return dict((Token(k), int(v))
                         for (k, v)
                         in stored.iteritems())
@@ -58,13 +58,14 @@ class Cache(object):
 
 
     def incr_follower(self, preds, token):
-        """incr_followers(token(), [followers])"""
-        # followers may contain duplicates
+        """incr_followers([token()], token())"""
+        # these incrs are unsafe, but redditron is not a bank
+        hpreds = self._hash_tokens(preds)
         try:
-            existing = int(self.cf.get(self._hash_tokens(preds))[token.tok])
+            existing = int(self.cf.get(hpreds)[token.tok])
         except (cassandra.ttypes.NotFoundException, KeyError, ValueError):
             existing = 0
-        self.cf.insert(self._hash_tokens(preds), {token.tok: str(existing+1)})
+        self.cf.insert(hpreds, {token.tok: str(existing+1)})
 
     def saw(self, key):
         self.seen_cf.insert(key, {'seen': '1'})
