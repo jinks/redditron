@@ -31,10 +31,6 @@ def get_reddit_comments(cache):
         for k in cache.seen_iterator(bodies.keys()):
             body = bodies[k]
             print 'Learning from %r' % (body,)
-            # we have to pick between being able to sometimes yield
-            # the same item twice, or sometimes never yielding an item
-            # (e.g. if an exception is thrown before control is passed
-            # back to us). we've chosen the former here
             yield body
 
         time.sleep(35)
