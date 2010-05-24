@@ -21,16 +21,11 @@ def get_reddit_comments(cache):
 
         js = json.loads(s)
         cms = js['data']['children']
-        bodies = {}
 
-        for cm in cms:
-            cm = cm['data']
-            if cm.get('body', None):
-                bodies[cm['id']] = cm['body']
-
-        for k in cache.seen_iterator(bodies.keys()):
-            body = bodies[k]
-            print 'Learning from %r' % (body,)
+        for cm in cache.seen_iterator(cms, lambda cm: cm['data']['id']):
+            body = cm['data']['body']
+            author = cm['data']['author']
+            print 'Learning from %s: %r' % (author, body)
             yield body
 
         time.sleep(35)
