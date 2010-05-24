@@ -109,3 +109,80 @@ class Cassandra(object):
                 all_keys_modified += 1
 
         return all_decrs, all_removals, all_keys_modified
+
+class Redis(object):
+    # Types:
+    # * tokenlist() -> [Token]
+    # * hashedtoken()
+
+    def __init__(self, init_args):
+        import redis
+
+        host, port, db_num = init_args.split(',')
+        self.client = redis.Redis(host, int(port), int(db_num))
+
+    def _hash_tokens(self, tokens):
+        """tokenlist() -> hashedtoken()"""
+        return ' '.join(tok.tok.encode('utf-8') for tok in tokens)
+
+    def get_followers(self, keys):
+        """get_followers([tokenlist()]) -> dict(Token -> count)"""
+        stored = self.client.hgetall(self._hash_tokens(keys))
+        return dict((Token(k), int(v))
+                    for (k, v)
+                    in stored.iteritems())
+
+
+    def incr_follower(self, preds, token):
+        """incr_followers([token()], token())"""
+        # incrs are atomic in redis
+        hpreds = self._hash_tokens(preds)
+        self.client.hincrby(hpreds, token.tok, 1)
+
+    def saw(self, key):
+        self.client.sadd('_redikov_seen', key)
+
+    def seen(self, key):
+        return self.client.sismember('_redikov_seen', key)
+
+    def seen_iterator(self, it, key = lambda x: x):
+        # this filter errs on the side of acking an item before it's
+        # been processed.
+        for x in it:
+            seen_key = key(x)
+            if not self.seen(seen_key):
+                self.saw(seen_key)
+                yield x
+
+    def cleanup(self, decr):
+        all_decrs = 0
+        all_removals = 0
+        all_keys_modified = 0
+        for key in self.client.keys():
+            if key == '_redikov_seen':
+                continue
+            inserts = {}
+            removals = []
+            for fs, count in self.client.hgetall(key).iteritems():
+                count = long(count)
+                if count > decr:
+                    inserts[fs] = count - decr
+                else:
+                    removals.append(fs)
+
+            if removals:
+                # delete the keys for which decring their counts would
+                # cause them to disappear
+                for removal in removals:
+                    self.client.hdel(key, removal)
+                all_removals += len(removals)
+
+            if inserts:
+                # and decr the others
+                self.client.hmset(key, inserts)
+                all_decrs += len(inserts)
+
+            if removals or inserts:
+                all_keys_modified += 1
+
+        return all_decrs, all_removals, all_keys_modified
