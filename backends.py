@@ -186,3 +186,74 @@ class Redis(object):
                 all_keys_modified += 1
 
         return all_decrs, all_removals, all_keys_modified
+
+class CouchDB(object):
+    # Types:
+    # * tokenlist() -> [Token]
+    # * hashedtoken()
+    def __init__(self, init_args):
+
+        from couchdb.client import Server, Database, ResourceConflict, PreconditionFailed, ResourceNotFound
+
+        db_uri, db_name = init_args.split(',')
+        self.db = self.get_db(db_uri, db_name)
+        self.seen_db = self.get_db(db_uri, db_name + "-seen")
+
+    def get_db(self, db_uri, db_name):
+        server = Server(db_uri)
+        try:
+            db = server[db_name]
+        except ResourceNotFound:
+            db = server.create(db_name)
+        return db
+
+    def _hash_tokens(self, tokens):
+        """tokenlist() -> hashedtoken()"""
+        return ' '.join(tok.tok.encode('utf-8') for tok in tokens)
+
+    def get_followers(self, keys):
+        """get_followers([tokenlist()]) -> dict(Token -> count)"""
+        try:
+            stored = self.db[self._hash_tokens(keys)]
+        except:
+            stored = {}
+        return dict((Token(k), int(v))
+                    for (k, v)
+                    in stored.iteritems() if k != '_rev' and k != '_id')
+
+
+    def incr_follower(self, preds, token):
+        """incr_followers([token()], token())"""
+        # these incrs are unsafe, but redditron is not a bank
+        hpreds = self._hash_tokens(preds)
+        try:
+            if hpreds in self.db:
+                orig = self.db[hpreds]
+                orig[token.tok] = orig.get(token.tok, 0) + 1
+                self.db[orig.id] = orig
+            else:
+                self.db[hpreds] = {token.tok: 1}
+        except:
+            pass
+            #TODO: error-handling
+
+    def saw(self, key):
+        try:
+            self.seen_db[key] = {'seen': 1}
+        except:
+            print key
+
+    def seen(self, key):
+        return key in self.seen_db
+
+    def seen_iterator(self, it, key = lambda x: x):
+        # this filter errs on the side of acking an item before it's
+        # been processed.
+        for x in it:
+            seen_key = key(x)
+            if not self.seen(seen_key):
+                self.saw(seen_key)
+                yield x
+
+    def cleanup(self, decr):
+        raise NotImplementedError
