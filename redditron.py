@@ -5,7 +5,8 @@ from urllib2 import urlopen
 import simplejson as json
 import time
 
-from cassacov import Cache, save_chains
+from markov import save_chains
+from backends import Cassandra as Cache
 
 def main(memc):
     cache = Cache(memc)

@@ -7,7 +7,8 @@ import time
 import twitter
 import urllib2 # python-twitter throws exceptions from here
 
-from cassacov import Cache, save_chains, create_sentences, limit
+from markov import save_chains, create_sentences, limit
+from backends import Cassandra as Cache
 
 MAX_LENGTH = 140
 
