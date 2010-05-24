@@ -6,10 +6,10 @@ class Cassandra(object):
     # * tokenlist() -> [Token]
     # * hashedtoken()
 
-    import pycassa
-    import cassandra.ttypes
-
     def __init__(self, init_args):
+        import pycassa
+        import cassandra.ttypes
+
         seed, keyspace, column_family,seen_cf = init_args.split(',')
         self.seeds = [seed]
         self.keyspace = keyspace
